@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { invoke } from '@tauri-apps/api/core';
 import type { CalibrationData, Measurement } from '../types';
 
@@ -31,7 +31,14 @@ const defaultCalibrationData = (): CalibrationData => ({
   customer: null
 });
 
-const calibrationData = ref<CalibrationData>(props.initialData || defaultCalibrationData());
+const calibrationData = ref<CalibrationData>(defaultCalibrationData());
+
+// Watch for changes to initialData and update form accordingly
+watch(() => props.initialData, (newData) => {
+  if (newData) {
+    calibrationData.value = { ...newData };
+  }
+}, { immediate: true });
 const loading = ref(false);
 const message = ref("");
 

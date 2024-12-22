@@ -1,64 +1,50 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
-import CalibrationForm from './components/CalibrationForm.vue';
-import CalibrationTable from './components/CalibrationTable.vue';
 import Footer from './components/Footer.vue';
-import { useCalibrations } from './composables/useCalibrations';
-import type { CalibrationData } from './types';
-
-const { calibrations, loadCalibrations, openCalibroFolder } = useCalibrations();
-const isEditMode = ref(false);
-const selectedCalibration = ref<CalibrationData | undefined>(undefined);
-
-onMounted(async () => {
-  await loadCalibrations();
-});
-
-function startEdit(calibration: CalibrationData) {
-  selectedCalibration.value = calibration;
-  isEditMode.value = true;
-  // Scroll to form
-  document.querySelector('.calibration-form')?.scrollIntoView({ behavior: 'smooth' });
-}
-
-function cancelEdit() {
-  selectedCalibration.value = undefined;
-  isEditMode.value = false;
-}
-
-async function onSaved() {
-  await loadCalibrations();
-  selectedCalibration.value = undefined;
-  isEditMode.value = false;
-}
 </script>
 
 <template>
+  <nav>
+    <router-link to="/new" class="nav-link">New Calibration</router-link>
+    <router-link to="/past" class="nav-link">Past Calibrations</router-link>
+  </nav>
+
   <Suspense>
-    <main class="container">
-      <h1>Calibration Certificate System</h1>
-      <button @click="openCalibroFolder" class="folder-button">
-        Open Data & Certificates Folder
-      </button>
-
-      <CalibrationForm 
-        :initial-data="selectedCalibration"
-        :is-edit-mode="isEditMode"
-        @saved="onSaved"
-        @cancelled="cancelEdit"
-      />
-
-      <CalibrationTable 
-        :calibrations="calibrations"
-        @edit="startEdit"
-      />
-    </main>
+    <router-view></router-view>
     <template #fallback>
       <div class="loading">Loading...</div>
     </template>
   </Suspense>
+  
   <Footer />
 </template>
+
+<style scoped>
+nav {
+  padding: 1rem;
+  background-color: #f8f9fa;
+  text-align: center;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.nav-link {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  margin: 0 0.5rem;
+  color: #495057;
+  text-decoration: none;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.nav-link:hover {
+  background-color: #e9ecef;
+}
+
+.nav-link.router-link-active {
+  background-color: #007bff;
+  color: white;
+}
+</style>
 
 <style>
 :root {
@@ -66,40 +52,13 @@ async function onSaved() {
   font-size: 16px;
   line-height: 24px;
   font-weight: 400;
-
   color: #000000;
   background-color: #ffffff;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  padding: 10vh 2rem 5rem;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 2rem;
-  max-width: 1200px;
-  margin: 0 auto;
-  text-align: center;
-}
-
-@media (min-width: 1024px) {
-  .container {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  
-  .container h1 {
-    grid-column: 1 / -1;
-  }
-}
-
-h1 {
-  text-align: center;
 }
 
 input,
@@ -114,6 +73,7 @@ button {
   background-color: #ffffff;
   transition: border-color 0.25s;
   box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
+  outline: none;
 }
 
 button {
@@ -127,25 +87,6 @@ button:hover {
 button:active {
   border-color: #396cd8;
   background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-.folder-button {
-  background-color: #4CAF50;
-  color: white;
-  border: none;
-  padding: 0.8em 1.6em;
-  margin-bottom: 1em;
-  grid-column: 1 / -1;
-}
-
-.folder-button:hover {
-  background-color: #45a049;
-  border-color: transparent;
 }
 
 .loading {
