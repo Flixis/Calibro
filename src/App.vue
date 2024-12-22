@@ -1,474 +1,66 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { invoke } from '@tauri-apps/api/core';
-import { getTauriVersion, getVersion } from '@tauri-apps/api/app';
+import CalibrationForm from './components/CalibrationForm.vue';
+import CalibrationTable from './components/CalibrationTable.vue';
+import Footer from './components/Footer.vue';
+import { useCalibrations } from './composables/useCalibrations';
+import type { CalibrationData } from './types';
 
-const appVersion = ref("");
-const tauriVersion = ref("");
-
-const emptyMeasurement = () => ({
-  name: "",
-  voltage: 0,
-  current: 0,
-  frequency: 0,
-  power: 0
-});
-
-const defaultCalibrationData = () => ({
-  measurements: [emptyMeasurement()],
-  calibration_date: "",
-  certificate_number: "",
-  model_details: "",
-  company_name: "",
-  po_number: "",
-  customer: null
-});
-
-const calibrationData = ref(defaultCalibrationData());
-const calibrations = ref<any[]>([]);
-const message = ref("");
-const loading = ref(false);
+const { calibrations, loadCalibrations, openCalibroFolder } = useCalibrations();
 const isEditMode = ref(false);
+const selectedCalibration = ref<CalibrationData | undefined>(undefined);
 
 onMounted(async () => {
-  // now you can await safely inside onMounted
-  appVersion.value = await getVersion();
-  tauriVersion.value = await getTauriVersion();
   await loadCalibrations();
 });
 
-
-function startEdit(calibration: any) {
-  calibrationData.value = JSON.parse(JSON.stringify(calibration)); // Deep clone
+function startEdit(calibration: CalibrationData) {
+  selectedCalibration.value = calibration;
   isEditMode.value = true;
   // Scroll to form
   document.querySelector('.calibration-form')?.scrollIntoView({ behavior: 'smooth' });
 }
 
 function cancelEdit() {
-  calibrationData.value = defaultCalibrationData();
+  selectedCalibration.value = undefined;
   isEditMode.value = false;
 }
 
-async function saveCalibration() {
-  const command = isEditMode.value ? 'update_calibration' : 'save_calibration';
-  try {
-    loading.value = true;
-    message.value = await invoke(command, { data: calibrationData.value });
-    await loadCalibrations();
-    // Reset form
-    calibrationData.value = defaultCalibrationData();
-    isEditMode.value = false;
-  } catch (error) {
-    message.value = `Error: ${error}`;
-  } finally {
-    loading.value = false;
-  }
+async function onSaved() {
+  await loadCalibrations();
+  selectedCalibration.value = undefined;
+  isEditMode.value = false;
 }
-
-async function loadCalibrations() {
-  try {
-    calibrations.value = await invoke("get_calibrations");
-  } catch (error) {
-    message.value = `Error loading calibrations: ${error}`;
-  }
-}
-
-async function openCalibroFolder() {
-  try {
-    await invoke('open_folder');
-  } catch (error) {
-    message.value = `Error opening folder: ${error}`;
-  }
-}
-
-async function generatePdf(certificateNumber: string) {
-  try {
-    message.value = "Generating PDF...";
-    await invoke('generate_pdf', { certificateNumber });
-    message.value = "PDF generated successfully";
-  } catch (error) {
-    message.value = `Error generating PDF: ${error}`;
-  }
-}
-
-loadCalibrations();
 </script>
 
 <template>
   <Suspense>
     <main class="container">
-    <h1>Calibration Certificate System</h1>
-    <button @click="openCalibroFolder" class="folder-button">
-      Open Data & Certificates Folder
-    </button>
+      <h1>Calibration Certificate System</h1>
+      <button @click="openCalibroFolder" class="folder-button">
+        Open Data & Certificates Folder
+      </button>
 
-    <div class="card">
-      <h2>{{ isEditMode ? 'Edit Calibration' : 'New Calibration' }}</h2>
-      <form @submit.prevent="saveCalibration" class="calibration-form">
-        <div class="form-group">
-          <label>Company Name:</label>
-          <input v-model="calibrationData.company_name" required placeholder="Enter company name" />
-        </div>
+      <CalibrationForm 
+        :initial-data="selectedCalibration"
+        :is-edit-mode="isEditMode"
+        @saved="onSaved"
+        @cancelled="cancelEdit"
+      />
 
-        <div class="form-group">
-          <label>Certificate Number:</label>
-          <input 
-            v-model="calibrationData.certificate_number" 
-            required 
-            placeholder="Enter certificate number"
-            :disabled="isEditMode" 
-          />
-        </div>
-
-        <div class="form-group">
-          <label>PO Number:</label>
-          <input v-model="calibrationData.po_number" required placeholder="Enter PO number" />
-        </div>
-
-        <div class="form-group">
-          <label>Customer (Optional):</label>
-          <input v-model="calibrationData.customer" placeholder="Enter customer name" />
-        </div>
-
-        <div class="form-group">
-          <label>Model Details:</label>
-          <input v-model="calibrationData.model_details" required placeholder="Enter model details" />
-        </div>
-
-        <div class="form-group">
-          <label>Calibration Date:</label>
-          <input type="date" v-model="calibrationData.calibration_date" required />
-        </div>
-
-        <div class="measurements-container">
-          <h3>Measurements</h3>
-          <div v-for="(measurement, index) in calibrationData.measurements" :key="index" class="measurement-group">
-            <div class="measurement-header">
-              <h4>Measurement {{ index + 1 }}</h4>
-              <button 
-                v-if="calibrationData.measurements.length > 1" 
-                type="button" 
-                class="remove-btn"
-                @click="calibrationData.measurements.splice(index, 1)"
-              >
-                Remove
-              </button>
-            </div>
-
-            <div class="form-group">
-              <label>Name:</label>
-              <input v-model="measurement.name" required placeholder="Enter measurement name" />
-            </div>
-
-            <div class="measurements">
-              <div class="form-group">
-                <label>Voltage (V):</label>
-                <input type="number" v-model="measurement.voltage" required step="0.01" />
-              </div>
-
-              <div class="form-group">
-                <label>Current (A):</label>
-                <input type="number" v-model="measurement.current" required step="0.01" />
-              </div>
-
-              <div class="form-group">
-                <label>Frequency (Hz):</label>
-                <input type="number" v-model="measurement.frequency" required step="0.01" />
-              </div>
-
-              <div class="form-group">
-                <label>Power (W):</label>
-                <input type="number" v-model="measurement.power" required step="0.01" />
-              </div>
-            </div>
-          </div>
-
-          <button 
-            type="button" 
-            class="add-measurement-btn"
-            @click="calibrationData.measurements.push(emptyMeasurement())"
-          >
-            Add Measurement
-          </button>
-        </div>
-
-        <div class="button-group">
-          <button type="submit" :disabled="loading">
-            {{ loading ? 'Saving...' : (isEditMode ? 'Update Calibration' : 'Save Calibration') }}
-          </button>
-          <button 
-            v-if="isEditMode" 
-            type="button" 
-            class="cancel-btn" 
-            @click="cancelEdit"
-            :disabled="loading"
-          >
-            Cancel
-          </button>
-        </div>
-      </form>
-
-      <p class="message" :class="{ error: message.includes('Error') }">{{ message }}</p>
-    </div>
-
-    <div class="card" v-if="calibrations.length > 0">
-      <h2>Recent Calibrations</h2>
-      <div class="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>Certificate #</th>
-              <th>Company</th>
-              <th>Customer</th>
-              <th>Model</th>
-              <th>Date</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="cal in calibrations" :key="cal.certificate_number">
-              <td>{{ cal.certificate_number }}</td>
-              <td>{{ cal.company_name }}</td>
-              <td>{{ cal.customer || '-' }}</td>
-              <td>{{ cal.model_details }}</td>
-              <td>{{ cal.calibration_date }}</td>
-              <td class="action-buttons">
-                <button @click="generatePdf(cal.certificate_number)" class="action-btn">
-                  Generate PDF
-                </button>
-                <button @click="startEdit(cal)" class="action-btn edit-btn">
-                  Edit
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+      <CalibrationTable 
+        :calibrations="calibrations"
+        @edit="startEdit"
+      />
     </main>
     <template #fallback>
       <div class="loading">Loading...</div>
     </template>
   </Suspense>
-  <footer class="footer">
-    <div class="footer-content">
-      <span>Created by Tariq Dinmohamed</span>
-      <span>|</span>
-      <a href="https://github.com/flixis" target="_blank" rel="noopener noreferrer">GitHub</a>
-      <span>|</span>
-      <span>App v{{ appVersion }}</span>
-      <span>|</span>
-      <span>Tauri v{{ tauriVersion }}</span>
-    </div>
-  </footer>
+  <Footer />
 </template>
 
-<style scoped>
-.card {
-  background: white;
-  padding: 2em;
-  border-radius: 8px;
-  margin: 1em 0;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.calibration-form {
-  display: flex;
-  flex-direction: column;
-  gap: 1em;
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5em;
-  text-align: left;
-}
-
-.form-group label {
-  font-weight: 500;
-}
-
-.measurements {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1em;
-  padding: 1em;
-  background: #f8f8f8;
-  border-radius: 8px;
-}
-
-.message {
-  margin-top: 1em;
-  padding: 1em;
-  border-radius: 4px;
-  background: #e8f5e9;
-}
-
-.message.error {
-  background: #ffebee;
-  color: #c62828;
-}
-
-.table-container {
-  overflow-x: auto;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 1em;
-}
-
-th, td {
-  padding: 0.75em;
-  text-align: left;
-  border-bottom: 1px solid #ddd;
-}
-
-th {
-  background: #f5f5f5;
-  font-weight: 600;
-}
-
-tr:hover {
-  background: #f8f8f8;
-}
-
-@media (max-width: 768px) {
-  .measurements {
-    grid-template-columns: 1fr;
-  }
-}
-</style>
 <style>
-.measurements-container {
-  margin: 2em 0;
-  padding: 1em;
-  background: #f8f8f8;
-  border-radius: 8px;
-}
-
-.measurement-group {
-  margin-bottom: 2em;
-  padding: 1em;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.measurement-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1em;
-}
-
-.remove-btn {
-  background-color: #dc3545;
-  color: white;
-  padding: 0.4em 0.8em;
-  border: none;
-  border-radius: 4px;
-}
-
-.remove-btn:hover {
-  background-color: #c82333;
-  border-color: transparent;
-}
-
-.add-measurement-btn {
-  background-color: #28a745;
-  color: white;
-  border: none;
-  margin-top: 1em;
-  width: 100%;
-}
-
-.add-measurement-btn:hover {
-  background-color: #218838;
-  border-color: transparent;
-}
-
-.action-btn {
-  background-color: #007bff;
-  color: white;
-  border: none;
-  padding: 0.4em 0.8em;
-  border-radius: 4px;
-}
-
-.action-btn:hover {
-  background-color: #0056b3;
-  border-color: transparent;
-}
-
-.edit-btn {
-  background-color: #28a745;
-}
-
-.edit-btn:hover {
-  background-color: #218838;
-}
-
-.cancel-btn {
-  background-color: #6c757d;
-  color: white;
-}
-
-.cancel-btn:hover {
-  background-color: #5a6268;
-  border-color: transparent;
-}
-
-.button-group {
-  display: flex;
-  gap: 1em;
-  justify-content: center;
-}
-
-.action-buttons {
-  display: flex;
-  gap: 0.5em;
-}
-
-.footer {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background-color: #f8f8f8;
-  border-top: 1px solid #ddd;
-  padding: 1rem;
-  text-align: center;
-  font-size: 0.9rem;
-}
-
-.footer-content {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 1rem;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.footer-content span {
-  color: #666;
-}
-
-.footer-content a {
-  color: #396cd8;
-  text-decoration: none;
-}
-
-.footer-content a:hover {
-  text-decoration: underline;
-}
-
 :root {
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
@@ -506,32 +98,6 @@ tr:hover {
   }
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
 h1 {
   text-align: center;
 }
@@ -557,6 +123,7 @@ button {
 button:hover {
   border-color: #396cd8;
 }
+
 button:active {
   border-color: #396cd8;
   background-color: #e8e8e8;
@@ -565,10 +132,6 @@ button:active {
 input,
 button {
   outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
 }
 
 .folder-button {

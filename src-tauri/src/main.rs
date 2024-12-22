@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    calibro_lib::run()
+    calibro_lib::run().expect("Error while running application")
 }
