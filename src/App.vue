@@ -6,11 +6,16 @@ import { getTauriVersion, getVersion } from '@tauri-apps/api/app';
 const appVersion = ref("");
 const tauriVersion = ref("");
 
-const calibrationData = ref({
+const emptyMeasurement = () => ({
+  name: "",
   voltage: 0,
   current: 0,
   frequency: 0,
-  power: 0,
+  power: 0
+});
+
+const calibrationData = ref({
+  measurements: [emptyMeasurement()],
   calibration_date: "",
   certificate_number: "",
   model_details: "",
@@ -37,10 +42,7 @@ async function saveCalibration() {
     await loadCalibrations();
     // Reset form
     calibrationData.value = {
-      voltage: 0,
-      current: 0,
-      frequency: 0,
-      power: 0,
+      measurements: [emptyMeasurement()],
       calibration_date: "",
       certificate_number: "",
       model_details: "",
@@ -67,6 +69,16 @@ async function openCalibroFolder() {
     await invoke('open_folder');
   } catch (error) {
     message.value = `Error opening folder: ${error}`;
+  }
+}
+
+async function generatePdf(certificateNumber: string) {
+  try {
+    message.value = "Generating PDF...";
+    await invoke('generate_pdf', { certificateNumber });
+    message.value = "PDF generated successfully";
+  } catch (error) {
+    message.value = `Error generating PDF: ${error}`;
   }
 }
 
@@ -109,26 +121,56 @@ loadCalibrations();
           <input type="date" v-model="calibrationData.calibration_date" required />
         </div>
 
-        <div class="measurements">
-          <div class="form-group">
-            <label>Voltage (V):</label>
-            <input type="number" v-model="calibrationData.voltage" required step="0.01" />
+        <div class="measurements-container">
+          <h3>Measurements</h3>
+          <div v-for="(measurement, index) in calibrationData.measurements" :key="index" class="measurement-group">
+            <div class="measurement-header">
+              <h4>Measurement {{ index + 1 }}</h4>
+              <button 
+                v-if="calibrationData.measurements.length > 1" 
+                type="button" 
+                class="remove-btn"
+                @click="calibrationData.measurements.splice(index, 1)"
+              >
+                Remove
+              </button>
+            </div>
+
+            <div class="form-group">
+              <label>Name:</label>
+              <input v-model="measurement.name" required placeholder="Enter measurement name" />
+            </div>
+
+            <div class="measurements">
+              <div class="form-group">
+                <label>Voltage (V):</label>
+                <input type="number" v-model="measurement.voltage" required step="0.01" />
+              </div>
+
+              <div class="form-group">
+                <label>Current (A):</label>
+                <input type="number" v-model="measurement.current" required step="0.01" />
+              </div>
+
+              <div class="form-group">
+                <label>Frequency (Hz):</label>
+                <input type="number" v-model="measurement.frequency" required step="0.01" />
+              </div>
+
+              <div class="form-group">
+                <label>Power (W):</label>
+                <input type="number" v-model="measurement.power" required step="0.01" />
+              </div>
+            </div>
           </div>
 
-          <div class="form-group">
-            <label>Current (A):</label>
-            <input type="number" v-model="calibrationData.current" required step="0.01" />
-          </div>
-
-          <div class="form-group">
-            <label>Frequency (Hz):</label>
-            <input type="number" v-model="calibrationData.frequency" required step="0.01" />
-          </div>
-
-          <div class="form-group">
-            <label>Power (W):</label>
-            <input type="number" v-model="calibrationData.power" required step="0.01" />
-          </div>
+          <button 
+            type="button" 
+            class="add-measurement-btn"
+            @click="calibrationData.measurements.push(emptyMeasurement())"
+          >
+            Add Measurement
+          </button>
         </div>
 
         <button type="submit" :disabled="loading">
@@ -149,7 +191,7 @@ loadCalibrations();
               <th>Company</th>
               <th>Model</th>
               <th>Date</th>
-              <th>Measurements</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -159,8 +201,9 @@ loadCalibrations();
               <td>{{ cal.model_details }}</td>
               <td>{{ cal.calibration_date }}</td>
               <td>
-                {{ cal.voltage }}V, {{ cal.current }}A,
-                {{ cal.frequency }}Hz, {{ cal.power }}W
+                <button @click="generatePdf(cal.certificate_number)" class="action-btn">
+                  Generate PDF
+                </button>
               </td>
             </tr>
           </tbody>
@@ -266,6 +309,67 @@ tr:hover {
 }
 </style>
 <style>
+.measurements-container {
+  margin: 2em 0;
+  padding: 1em;
+  background: #f8f8f8;
+  border-radius: 8px;
+}
+
+.measurement-group {
+  margin-bottom: 2em;
+  padding: 1em;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.measurement-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1em;
+}
+
+.remove-btn {
+  background-color: #dc3545;
+  color: white;
+  padding: 0.4em 0.8em;
+  border: none;
+  border-radius: 4px;
+}
+
+.remove-btn:hover {
+  background-color: #c82333;
+  border-color: transparent;
+}
+
+.add-measurement-btn {
+  background-color: #28a745;
+  color: white;
+  border: none;
+  margin-top: 1em;
+  width: 100%;
+}
+
+.add-measurement-btn:hover {
+  background-color: #218838;
+  border-color: transparent;
+}
+
+.action-btn {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 0.4em 0.8em;
+  border-radius: 4px;
+}
+
+.action-btn:hover {
+  background-color: #0056b3;
+  border-color: transparent;
+}
+
 .footer {
   position: fixed;
   bottom: 0;

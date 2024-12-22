@@ -9,11 +9,17 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CalibrationData {
+pub struct Measurement {
+    name: String,
     voltage: f64,
     current: f64,
     frequency: f64,
     power: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CalibrationData {
+    measurements: Vec<Measurement>,
     calibration_date: String,
     certificate_number: String,
     model_details: String,
@@ -40,16 +46,26 @@ fn init_db(app_handle: &AppHandle) -> SqlResult<Connection> {
     db.execute(
         "CREATE TABLE IF NOT EXISTS calibrations (
             id INTEGER PRIMARY KEY,
-            voltage REAL NOT NULL,
-            current REAL NOT NULL,
-            frequency REAL NOT NULL,
-            power REAL NOT NULL,
             calibration_date TEXT NOT NULL,
             certificate_number TEXT NOT NULL UNIQUE,
             model_details TEXT NOT NULL,
             company_name TEXT NOT NULL,
             po_number TEXT NOT NULL,
             created_at TEXT NOT NULL
+        )",
+        [],
+    )?;
+
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS measurements (
+            id INTEGER PRIMARY KEY,
+            calibration_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            voltage REAL NOT NULL,
+            current REAL NOT NULL,
+            frequency REAL NOT NULL,
+            power REAL NOT NULL,
+            FOREIGN KEY(calibration_id) REFERENCES calibrations(id)
         )",
         [],
     )?;
@@ -114,30 +130,24 @@ fn generate_certificate(
 
     // Measurements
     add_text("Calibration Measurements:", 14_f32, Mm(20.0), Mm(200.0));
-    add_text(
-        &format!("Voltage: {} V", data.voltage),
-        12_f32,
-        Mm(30.0),
-        Mm(190.0),
-    );
-    add_text(
-        &format!("Current: {} A", data.current),
-        12_f32,
-        Mm(30.0),
-        Mm(180.0),
-    );
-    add_text(
-        &format!("Frequency: {} Hz", data.frequency),
-        12_f32,
-        Mm(30.0),
-        Mm(170.0),
-    );
-    add_text(
-        &format!("Power: {} W", data.power),
-        12_f32,
-        Mm(30.0),
-        Mm(160.0),
-    );
+    
+    let mut y_pos = Mm(190.0);
+    for measurement in &data.measurements {
+        add_text(&format!("Measurement: {}", measurement.name), 12_f32, Mm(30.0), y_pos);
+        y_pos = y_pos - Mm(10.0);
+        
+        add_text(&format!("  Voltage: {} V", measurement.voltage), 12_f32, Mm(40.0), y_pos);
+        y_pos = y_pos - Mm(10.0);
+        
+        add_text(&format!("  Current: {} A", measurement.current), 12_f32, Mm(40.0), y_pos);
+        y_pos = y_pos - Mm(10.0);
+        
+        add_text(&format!("  Frequency: {} Hz", measurement.frequency), 12_f32, Mm(40.0), y_pos);
+        y_pos = y_pos - Mm(10.0);
+        
+        add_text(&format!("  Power: {} W", measurement.power), 12_f32, Mm(40.0), y_pos);
+        y_pos = y_pos - Mm(15.0); // Extra space between measurements
+    }
 
     let file = File::create(output_path)?;
     let mut writer = BufWriter::new(file);
@@ -151,84 +161,119 @@ async fn save_calibration(
     state: tauri::State<'_, DbState>,
     data: CalibrationData,
 ) -> Result<String, String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|_| "Failed to lock database connection")?;
+    {
+        let mut conn = state
+            .0
+            .lock()
+            .map_err(|_| "Failed to lock database connection")?;
 
-    // Save to database
-    conn.execute(
-        "INSERT INTO calibrations (
-            voltage, current, frequency, power, 
-            calibration_date, certificate_number, model_details,
-            company_name, po_number, created_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        (
-            data.voltage,
-            data.current,
-            data.frequency,
-            data.power,
-            &data.calibration_date,
-            &data.certificate_number,
-            &data.model_details,
-            &data.company_name,
-            &data.po_number,
-            Local::now().to_string(),
-        ),
-    )
-    .map_err(|e| e.to_string())?;
+        // Start a transaction
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    // Generate certificate
-    let app_dir = app_handle
-        .path()
-        .app_data_dir()
-        .expect("Failed to get app data dir");
-    let certificates_dir = app_dir.join("certificates");
-    fs::create_dir_all(&certificates_dir).map_err(|e| e.to_string())?;
+        // Save calibration data
+        tx.execute(
+            "INSERT INTO calibrations (
+                calibration_date, certificate_number, model_details,
+                company_name, po_number, created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            (
+                &data.calibration_date,
+                &data.certificate_number,
+                &data.model_details,
+                &data.company_name,
+                &data.po_number,
+                Local::now().to_string(),
+            ),
+        )
+        .map_err(|e| e.to_string())?;
 
-    let cert_path = certificates_dir.join(format!("{}.pdf", data.certificate_number));
-    generate_certificate(&data, &cert_path).map_err(|e| e.to_string())?;
+        let calibration_id = tx.last_insert_rowid();
 
-    Ok("Calibration data saved and certificate generated successfully".to_string())
+        // Save measurements
+        for measurement in &data.measurements {
+            tx.execute(
+                "INSERT INTO measurements (
+                    calibration_id, name, voltage, current, frequency, power
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                (
+                    calibration_id,
+                    &measurement.name,
+                    measurement.voltage,
+                    measurement.current,
+                    measurement.frequency,
+                    measurement.power,
+                ),
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
+        // Commit transaction
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+
+    Ok("Calibration data saved successfully".to_string())
 }
 
 #[tauri::command]
 async fn get_calibrations(
     state: tauri::State<'_, DbState>,
 ) -> Result<Vec<CalibrationData>, String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|_| "Failed to lock database connection")?;
+    let mut conn = state.0.lock().map_err(|_| "Failed to lock database connection")?;
 
     let mut stmt = conn
         .prepare(
-            "SELECT voltage, current, frequency, power, 
-                calibration_date, certificate_number, model_details,
-                company_name, po_number 
-         FROM calibrations 
-         ORDER BY created_at DESC",
+            "SELECT id, calibration_date, certificate_number, model_details,
+                    company_name, po_number 
+             FROM calibrations 
+             ORDER BY created_at DESC",
         )
         .map_err(|e| e.to_string())?;
 
-    let calibrations = stmt
-        .query_map([], |row| {
-            Ok(CalibrationData {
-                voltage: row.get(0)?,
-                current: row.get(1)?,
-                frequency: row.get(2)?,
-                power: row.get(3)?,
-                calibration_date: row.get(4)?,
-                certificate_number: row.get(5)?,
-                model_details: row.get(6)?,
-                company_name: row.get(7)?,
-                po_number: row.get(8)?,
-            })
-        })
-        .map_err(|e| e.to_string())?;
+    let mut calibrations = Vec::new();
+    let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+    
+    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        let calibration_id = row.get::<_, i64>(0).map_err(|e| e.to_string())?;
+        let calibration_date = row.get::<_, String>(1).map_err(|e| e.to_string())?;
+        let certificate_number = row.get::<_, String>(2).map_err(|e| e.to_string())?;
+        let model_details = row.get::<_, String>(3).map_err(|e| e.to_string())?;
+        let company_name = row.get::<_, String>(4).map_err(|e| e.to_string())?;
+        let po_number = row.get::<_, String>(5).map_err(|e| e.to_string())?;
+        
+        // Get measurements for this calibration
+        let mut measurements = Vec::new();
+        {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name, voltage, current, frequency, power 
+                     FROM measurements 
+                     WHERE calibration_id = ?",
+                )
+                .map_err(|e| e.to_string())?;
 
-    let results: Result<Vec<_>, _> = calibrations.collect();
-    results.map_err(|e| e.to_string())
+            let mut rows = stmt.query([calibration_id]).map_err(|e| e.to_string())?;
+            while let Some(mrow) = rows.next().map_err(|e| e.to_string())? {
+                measurements.push(Measurement {
+                    name: mrow.get::<_, String>(0).map_err(|e| e.to_string())?,
+                    voltage: mrow.get::<_, f64>(1).map_err(|e| e.to_string())?,
+                    current: mrow.get::<_, f64>(2).map_err(|e| e.to_string())?,
+                    frequency: mrow.get::<_, f64>(3).map_err(|e| e.to_string())?,
+                    power: mrow.get::<_, f64>(4).map_err(|e| e.to_string())?,
+                });
+            }
+        }
+
+        calibrations.push(CalibrationData {
+            measurements,
+            calibration_date,
+            certificate_number,
+            model_details,
+            company_name,
+            po_number,
+        });
+    }
+
+    Ok(calibrations)
 }
 
 #[tauri::command]
@@ -238,6 +283,74 @@ async fn open_folder(app_handle: AppHandle) -> Result<(), String> {
         .app_data_dir()
         .map_err(|e| e.to_string())?;
     opener::open(app_dir).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn generate_pdf(
+    app_handle: AppHandle,
+    state: tauri::State<'_, DbState>,
+    certificate_number: String,
+) -> Result<(), String> {
+    let data = {
+        let conn = state.0.lock().map_err(|_| "Failed to lock database connection")?;
+        
+        // Get calibration data
+        let mut stmt = conn.prepare(
+            "SELECT calibration_date, certificate_number, model_details, company_name, po_number 
+             FROM calibrations 
+             WHERE certificate_number = ?",
+        ).map_err(|e| e.to_string())?;
+
+        let mut rows = stmt.query([&certificate_number]).map_err(|e| e.to_string())?;
+        let row = rows.next().map_err(|e| e.to_string())?.ok_or("Calibration not found")?;
+
+        let calibration_date = row.get::<_, String>(0).map_err(|e| e.to_string())?;
+        let cert_number = row.get::<_, String>(1).map_err(|e| e.to_string())?;
+        let model_details = row.get::<_, String>(2).map_err(|e| e.to_string())?;
+        let company_name = row.get::<_, String>(3).map_err(|e| e.to_string())?;
+        let po_number = row.get::<_, String>(4).map_err(|e| e.to_string())?;
+
+        // Get measurements
+        let mut measurements = Vec::new();
+        {
+            let mut stmt = conn.prepare(
+                "SELECT name, voltage, current, frequency, power 
+                 FROM measurements m
+                 JOIN calibrations c ON m.calibration_id = c.id
+                 WHERE c.certificate_number = ?",
+            ).map_err(|e| e.to_string())?;
+
+            let mut rows = stmt.query([&certificate_number]).map_err(|e| e.to_string())?;
+            while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+                measurements.push(Measurement {
+                    name: row.get::<_, String>(0).map_err(|e| e.to_string())?,
+                    voltage: row.get::<_, f64>(1).map_err(|e| e.to_string())?,
+                    current: row.get::<_, f64>(2).map_err(|e| e.to_string())?,
+                    frequency: row.get::<_, f64>(3).map_err(|e| e.to_string())?,
+                    power: row.get::<_, f64>(4).map_err(|e| e.to_string())?,
+                });
+            }
+        }
+
+        CalibrationData {
+            measurements,
+            calibration_date,
+            certificate_number: cert_number,
+            model_details,
+            company_name,
+            po_number,
+        }
+    };
+
+    // Generate certificate
+    let app_dir = app_handle.path().app_data_dir().expect("Failed to get app data dir");
+    let certificates_dir = app_dir.join("certificates");
+    fs::create_dir_all(&certificates_dir).map_err(|e| e.to_string())?;
+
+    let cert_path = certificates_dir.join(format!("{}.pdf", &certificate_number));
+    generate_certificate(&data, &cert_path).map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -250,7 +363,7 @@ pub fn run() {
             app.manage(DbState(Mutex::new(db)));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![save_calibration, get_calibrations, open_folder])
+        .invoke_handler(tauri::generate_handler![save_calibration, get_calibrations, open_folder, generate_pdf])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
