@@ -231,6 +231,15 @@ async fn get_calibrations(
     results.map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn open_folder(app_handle: AppHandle) -> Result<(), String> {
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    opener::open(app_dir).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -241,7 +250,7 @@ pub fn run() {
             app.manage(DbState(Mutex::new(db)));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![save_calibration, get_calibrations])
+        .invoke_handler(tauri::generate_handler![save_calibration, get_calibrations, open_folder])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

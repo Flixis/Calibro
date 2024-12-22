@@ -50,6 +50,14 @@ async function loadCalibrations() {
   }
 }
 
+async function openCalibroFolder() {
+  try {
+    await invoke('open_folder');
+  } catch (error) {
+    message.value = `Error opening folder: ${error}`;
+  }
+}
+
 onMounted(() => {
   loadCalibrations();
 });
@@ -58,6 +66,9 @@ onMounted(() => {
 <template>
   <main class="container">
     <h1>Calibration Certificate System</h1>
+    <button @click="openCalibroFolder" class="folder-button">
+      Open Data & Certificates Folder
+    </button>
 
     <div class="card">
       <h2>New Calibration</h2>
@@ -247,11 +258,23 @@ tr:hover {
 
 .container {
   margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+  padding: 10vh 2rem 2rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
   text-align: center;
+}
+
+@media (min-width: 1024px) {
+  .container {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .container h1 {
+    grid-column: 1 / -1;
+  }
 }
 
 .logo {
@@ -317,6 +340,20 @@ button {
 
 #greet-input {
   margin-right: 5px;
+}
+
+.folder-button {
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  padding: 0.8em 1.6em;
+  margin-bottom: 1em;
+  grid-column: 1 / -1;
+}
+
+.folder-button:hover {
+  background-color: #45a049;
+  border-color: transparent;
 }
 
 
