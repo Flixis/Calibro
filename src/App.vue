@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { invoke } from '@tauri-apps/api/core';
+import { getTauriVersion, getVersion } from '@tauri-apps/api/app';
+
+const appVersion = ref("");
+const tauriVersion = ref("");
 
 const calibrationData = ref({
   voltage: 0,
@@ -17,6 +21,14 @@ const calibrationData = ref({
 const calibrations = ref<any[]>([]);
 const message = ref("");
 const loading = ref(false);
+
+onMounted(async () => {
+  // now you can await safely inside onMounted
+  appVersion.value = await getVersion();
+  tauriVersion.value = await getTauriVersion();
+  await loadCalibrations();
+});
+
 
 async function saveCalibration() {
   try {
@@ -58,13 +70,12 @@ async function openCalibroFolder() {
   }
 }
 
-onMounted(() => {
-  loadCalibrations();
-});
+loadCalibrations();
 </script>
 
 <template>
-  <main class="container">
+  <Suspense>
+    <main class="container">
     <h1>Calibration Certificate System</h1>
     <button @click="openCalibroFolder" class="folder-button">
       Open Data & Certificates Folder
@@ -156,7 +167,22 @@ onMounted(() => {
         </table>
       </div>
     </div>
-  </main>
+    </main>
+    <template #fallback>
+      <div class="loading">Loading...</div>
+    </template>
+  </Suspense>
+  <footer class="footer">
+    <div class="footer-content">
+      <span>Created by Q</span>
+      <span>|</span>
+      <a href="https://github.com/Q" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <span>|</span>
+      <span>App v{{ appVersion }}</span>
+      <span>|</span>
+      <span>Tauri v{{ tauriVersion }}</span>
+    </div>
+  </footer>
 </template>
 
 <style scoped>
@@ -240,6 +266,40 @@ tr:hover {
 }
 </style>
 <style>
+.footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: #f8f8f8;
+  border-top: 1px solid #ddd;
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.9rem;
+}
+
+.footer-content {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.footer-content span {
+  color: #666;
+}
+
+.footer-content a {
+  color: #396cd8;
+  text-decoration: none;
+}
+
+.footer-content a:hover {
+  text-decoration: underline;
+}
+
 :root {
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
@@ -258,7 +318,7 @@ tr:hover {
 
 .container {
   margin: 0;
-  padding: 10vh 2rem 2rem;
+  padding: 10vh 2rem 5rem;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 2rem;
@@ -356,5 +416,12 @@ button {
   border-color: transparent;
 }
 
-
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-size: 1.2em;
+  color: #666;
+}
 </style>
