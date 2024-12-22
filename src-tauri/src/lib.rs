@@ -314,7 +314,7 @@ async fn generate_pdf(
         let mut measurements = Vec::new();
         {
             let mut stmt = conn.prepare(
-                "SELECT name, voltage, current, frequency, power 
+                "SELECT m.name, m.voltage, m.current, m.frequency, m.power 
                  FROM measurements m
                  JOIN calibrations c ON m.calibration_id = c.id
                  WHERE c.certificate_number = ?",
@@ -349,6 +349,9 @@ async fn generate_pdf(
 
     let cert_path = certificates_dir.join(format!("{}.pdf", &certificate_number));
     generate_certificate(&data, &cert_path).map_err(|e| e.to_string())?;
+    
+    // Open the generated PDF file
+    opener::open(&cert_path).map_err(|e| e.to_string())?;
 
     Ok(())
 }
