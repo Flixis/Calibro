@@ -14,18 +14,21 @@ const emptyMeasurement = () => ({
   power: 0
 });
 
-const calibrationData = ref({
+const defaultCalibrationData = () => ({
   measurements: [emptyMeasurement()],
   calibration_date: "",
   certificate_number: "",
   model_details: "",
   company_name: "",
-  po_number: ""
+  po_number: "",
+  customer: null
 });
 
+const calibrationData = ref(defaultCalibrationData());
 const calibrations = ref<any[]>([]);
 const message = ref("");
 const loading = ref(false);
+const isEditMode = ref(false);
 
 onMounted(async () => {
   // now you can await safely inside onMounted
@@ -35,20 +38,27 @@ onMounted(async () => {
 });
 
 
+function startEdit(calibration: any) {
+  calibrationData.value = JSON.parse(JSON.stringify(calibration)); // Deep clone
+  isEditMode.value = true;
+  // Scroll to form
+  document.querySelector('.calibration-form')?.scrollIntoView({ behavior: 'smooth' });
+}
+
+function cancelEdit() {
+  calibrationData.value = defaultCalibrationData();
+  isEditMode.value = false;
+}
+
 async function saveCalibration() {
+  const command = isEditMode.value ? 'update_calibration' : 'save_calibration';
   try {
     loading.value = true;
-    message.value = await invoke("save_calibration", { data: calibrationData.value });
+    message.value = await invoke(command, { data: calibrationData.value });
     await loadCalibrations();
     // Reset form
-    calibrationData.value = {
-      measurements: [emptyMeasurement()],
-      calibration_date: "",
-      certificate_number: "",
-      model_details: "",
-      company_name: "",
-      po_number: ""
-    };
+    calibrationData.value = defaultCalibrationData();
+    isEditMode.value = false;
   } catch (error) {
     message.value = `Error: ${error}`;
   } finally {
@@ -94,7 +104,7 @@ loadCalibrations();
     </button>
 
     <div class="card">
-      <h2>New Calibration</h2>
+      <h2>{{ isEditMode ? 'Edit Calibration' : 'New Calibration' }}</h2>
       <form @submit.prevent="saveCalibration" class="calibration-form">
         <div class="form-group">
           <label>Company Name:</label>
@@ -103,12 +113,22 @@ loadCalibrations();
 
         <div class="form-group">
           <label>Certificate Number:</label>
-          <input v-model="calibrationData.certificate_number" required placeholder="Enter certificate number" />
+          <input 
+            v-model="calibrationData.certificate_number" 
+            required 
+            placeholder="Enter certificate number"
+            :disabled="isEditMode" 
+          />
         </div>
 
         <div class="form-group">
           <label>PO Number:</label>
           <input v-model="calibrationData.po_number" required placeholder="Enter PO number" />
+        </div>
+
+        <div class="form-group">
+          <label>Customer (Optional):</label>
+          <input v-model="calibrationData.customer" placeholder="Enter customer name" />
         </div>
 
         <div class="form-group">
@@ -173,9 +193,20 @@ loadCalibrations();
           </button>
         </div>
 
-        <button type="submit" :disabled="loading">
-          {{ loading ? 'Saving...' : 'Save Calibration' }}
-        </button>
+        <div class="button-group">
+          <button type="submit" :disabled="loading">
+            {{ loading ? 'Saving...' : (isEditMode ? 'Update Calibration' : 'Save Calibration') }}
+          </button>
+          <button 
+            v-if="isEditMode" 
+            type="button" 
+            class="cancel-btn" 
+            @click="cancelEdit"
+            :disabled="loading"
+          >
+            Cancel
+          </button>
+        </div>
       </form>
 
       <p class="message" :class="{ error: message.includes('Error') }">{{ message }}</p>
@@ -189,6 +220,7 @@ loadCalibrations();
             <tr>
               <th>Certificate #</th>
               <th>Company</th>
+              <th>Customer</th>
               <th>Model</th>
               <th>Date</th>
               <th>Actions</th>
@@ -198,11 +230,15 @@ loadCalibrations();
             <tr v-for="cal in calibrations" :key="cal.certificate_number">
               <td>{{ cal.certificate_number }}</td>
               <td>{{ cal.company_name }}</td>
+              <td>{{ cal.customer || '-' }}</td>
               <td>{{ cal.model_details }}</td>
               <td>{{ cal.calibration_date }}</td>
-              <td>
+              <td class="action-buttons">
                 <button @click="generatePdf(cal.certificate_number)" class="action-btn">
                   Generate PDF
+                </button>
+                <button @click="startEdit(cal)" class="action-btn edit-btn">
+                  Edit
                 </button>
               </td>
             </tr>
@@ -368,6 +404,35 @@ tr:hover {
 .action-btn:hover {
   background-color: #0056b3;
   border-color: transparent;
+}
+
+.edit-btn {
+  background-color: #28a745;
+}
+
+.edit-btn:hover {
+  background-color: #218838;
+}
+
+.cancel-btn {
+  background-color: #6c757d;
+  color: white;
+}
+
+.cancel-btn:hover {
+  background-color: #5a6268;
+  border-color: transparent;
+}
+
+.button-group {
+  display: flex;
+  gap: 1em;
+  justify-content: center;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 0.5em;
 }
 
 .footer {

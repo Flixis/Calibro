@@ -25,6 +25,7 @@ pub struct CalibrationData {
     model_details: String,
     company_name: String,
     po_number: String,
+    customer: Option<String>,
 }
 
 // Ensure DbState is thread-safe
@@ -40,6 +41,14 @@ fn migrate_db(conn: &Connection) -> SqlResult<()> {
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<Result<Vec<_>, _>>()?;
 
+    // Check if we need to add the customer column
+    if !columns.iter().any(|c| c == "customer") {
+        conn.execute(
+            "ALTER TABLE calibrations ADD COLUMN customer TEXT",
+            [],
+        )?;
+    }
+
     // If we find any measurement columns in calibrations table, migrate them
     let measurement_columns = ["voltage", "current", "frequency", "power"];
     for col in measurement_columns.iter() {
@@ -53,6 +62,7 @@ fn migrate_db(conn: &Connection) -> SqlResult<()> {
                     model_details TEXT NOT NULL,
                     company_name TEXT NOT NULL,
                     po_number TEXT NOT NULL,
+                    customer TEXT,
                     created_at TEXT NOT NULL
                 )",
                 [],
@@ -62,7 +72,7 @@ fn migrate_db(conn: &Connection) -> SqlResult<()> {
             conn.execute(
                 "INSERT INTO calibrations_new 
                 SELECT id, calibration_date, certificate_number, model_details,
-                       company_name, po_number, created_at
+                       company_name, po_number, customer, created_at
                 FROM calibrations",
                 [],
             )?;
@@ -98,6 +108,7 @@ fn init_db(app_handle: &AppHandle) -> SqlResult<Connection> {
             model_details TEXT NOT NULL,
             company_name TEXT NOT NULL,
             po_number TEXT NOT NULL,
+            customer TEXT,
             created_at TEXT NOT NULL
         )",
         [],
@@ -150,35 +161,45 @@ fn generate_certificate(
         Mm(20.0),
         Mm(260.0),
     );
+    
+    if let Some(customer) = &data.customer {
+        add_text(
+            &format!("Customer: {}", customer),
+            12_f32,
+            Mm(20.0),
+            Mm(250.0),
+        );
+    }
     add_text(
         &format!("Certificate Number: {}", data.certificate_number),
         12_f32,
         Mm(20.0),
-        Mm(250.0),
+        if data.customer.is_some() { Mm(240.0) } else { Mm(250.0) },
     );
     add_text(
         &format!("PO Number: {}", data.po_number),
         12_f32,
         Mm(20.0),
-        Mm(240.0),
+        if data.customer.is_some() { Mm(230.0) } else { Mm(240.0) },
     );
     add_text(
         &format!("Model Details: {}", data.model_details),
         12_f32,
         Mm(20.0),
-        Mm(230.0),
+        if data.customer.is_some() { Mm(220.0) } else { Mm(230.0) },
     );
     add_text(
         &format!("Calibration Date: {}", data.calibration_date),
         12_f32,
         Mm(20.0),
-        Mm(220.0),
+        if data.customer.is_some() { Mm(210.0) } else { Mm(220.0) },
     );
 
     // Measurements
-    add_text("Calibration Measurements:", 14_f32, Mm(20.0), Mm(200.0));
+    let measurements_y = if data.customer.is_some() { Mm(190.0) } else { Mm(200.0) };
+    add_text("Calibration Measurements:", 14_f32, Mm(20.0), measurements_y);
     
-    let mut y_pos = Mm(190.0);
+    let mut y_pos = if data.customer.is_some() { Mm(180.0) } else { Mm(190.0) };
     for measurement in &data.measurements {
         add_text(&format!("Measurement: {}", measurement.name), 12_f32, Mm(30.0), y_pos);
         y_pos = y_pos - Mm(10.0);
@@ -221,14 +242,15 @@ async fn save_calibration(
         tx.execute(
             "INSERT INTO calibrations (
                 calibration_date, certificate_number, model_details,
-                company_name, po_number, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                company_name, po_number, customer, created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             (
                 &data.calibration_date,
                 &data.certificate_number,
                 &data.model_details,
                 &data.company_name,
                 &data.po_number,
+                &data.customer,
                 Local::now().to_string(),
             ),
         )
@@ -270,7 +292,7 @@ async fn get_calibrations(
     let mut stmt = conn
         .prepare(
             "SELECT id, calibration_date, certificate_number, model_details,
-                    company_name, po_number 
+                    company_name, po_number, customer 
              FROM calibrations 
              ORDER BY created_at DESC",
         )
@@ -286,6 +308,7 @@ async fn get_calibrations(
         let model_details = row.get::<_, String>(3).map_err(|e| e.to_string())?;
         let company_name = row.get::<_, String>(4).map_err(|e| e.to_string())?;
         let po_number = row.get::<_, String>(5).map_err(|e| e.to_string())?;
+        let customer = row.get::<_, Option<String>>(6).map_err(|e| e.to_string())?;
         
         // Get measurements for this calibration
         let mut measurements = Vec::new();
@@ -317,6 +340,7 @@ async fn get_calibrations(
             model_details,
             company_name,
             po_number,
+            customer,
         });
     }
 
@@ -333,6 +357,80 @@ async fn open_folder(app_handle: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn update_calibration(
+    app_handle: AppHandle,
+    state: tauri::State<'_, DbState>,
+    data: CalibrationData,
+) -> Result<String, String> {
+    let mut conn = state
+        .0
+        .lock()
+        .map_err(|_| "Failed to lock database connection")?;
+
+    // Start a transaction
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    // Get calibration ID
+    let calibration_id: i64 = tx
+        .query_row(
+            "SELECT id FROM calibrations WHERE certificate_number = ?",
+            [&data.certificate_number],
+            |row| row.get(0),
+        )
+        .map_err(|_| "Calibration not found".to_string())?;
+
+    // Update calibration data
+    tx.execute(
+        "UPDATE calibrations SET 
+            calibration_date = ?1,
+            model_details = ?2,
+            company_name = ?3,
+            po_number = ?4,
+            customer = ?5
+        WHERE certificate_number = ?6",
+        (
+            &data.calibration_date,
+            &data.model_details,
+            &data.company_name,
+            &data.po_number,
+            &data.customer,
+            &data.certificate_number,
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Delete old measurements
+    tx.execute(
+        "DELETE FROM measurements WHERE calibration_id = ?",
+        [calibration_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Insert new measurements
+    for measurement in &data.measurements {
+        tx.execute(
+            "INSERT INTO measurements (
+                calibration_id, name, voltage, current, frequency, power
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            (
+                calibration_id,
+                &measurement.name,
+                measurement.voltage,
+                measurement.current,
+                measurement.frequency,
+                measurement.power,
+            ),
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // Commit transaction
+    tx.commit().map_err(|e| e.to_string())?;
+
+    Ok("Calibration updated successfully".to_string())
+}
+
+#[tauri::command]
 async fn generate_pdf(
     app_handle: AppHandle,
     state: tauri::State<'_, DbState>,
@@ -343,7 +441,7 @@ async fn generate_pdf(
         
         // Get calibration data
         let mut stmt = conn.prepare(
-            "SELECT calibration_date, certificate_number, model_details, company_name, po_number 
+            "SELECT calibration_date, certificate_number, model_details, company_name, po_number, customer 
              FROM calibrations 
              WHERE certificate_number = ?",
         ).map_err(|e| e.to_string())?;
@@ -356,6 +454,7 @@ async fn generate_pdf(
         let model_details = row.get::<_, String>(2).map_err(|e| e.to_string())?;
         let company_name = row.get::<_, String>(3).map_err(|e| e.to_string())?;
         let po_number = row.get::<_, String>(4).map_err(|e| e.to_string())?;
+        let customer = row.get::<_, Option<String>>(5).map_err(|e| e.to_string())?;
 
         // Get measurements
         let mut measurements = Vec::new();
@@ -386,15 +485,31 @@ async fn generate_pdf(
             model_details,
             company_name,
             po_number,
+            customer,
         }
     };
 
     // Generate certificate
     let app_dir = app_handle.path().app_data_dir().expect("Failed to get app data dir");
-    let certificates_dir = app_dir.join("certificates");
-    fs::create_dir_all(&certificates_dir).map_err(|e| e.to_string())?;
+    let base_certificates_dir = app_dir.join("certificates");
+    
+    // Create the certificates directory path based on customer
+    let certificates_dir = match &data.customer {
+        Some(customer) => {
+            let customer_dir = base_certificates_dir.join(customer.replace(" ", "_"));
+            fs::create_dir_all(&customer_dir).map_err(|e| e.to_string())?;
+            customer_dir
+        },
+        None => {
+            let general_dir = base_certificates_dir.join("general");
+            fs::create_dir_all(&general_dir).map_err(|e| e.to_string())?;
+            general_dir
+        }
+    };
 
-    let cert_path = certificates_dir.join(format!("{}.pdf", &certificate_number));
+    // Create filename using just the certificate number since it's already in a customer folder
+    let filename = format!("{}.pdf", &certificate_number);
+    let cert_path = certificates_dir.join(filename);
     generate_certificate(&data, &cert_path).map_err(|e| e.to_string())?;
     
     // Open the generated PDF file
@@ -414,7 +529,7 @@ pub fn run() {
             app.manage(DbState(Mutex::new(db)));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![save_calibration, get_calibrations, open_folder, generate_pdf])
+        .invoke_handler(tauri::generate_handler![save_calibration, update_calibration, get_calibrations, open_folder, generate_pdf])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
