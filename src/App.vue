@@ -174,9 +174,9 @@ loadCalibrations();
   </Suspense>
   <footer class="footer">
     <div class="footer-content">
-      <span>Created by Q</span>
+      <span>Created by Tariq Dinmohamed</span>
       <span>|</span>
-      <a href="https://github.com/Q" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://github.com/flixis" target="_blank" rel="noopener noreferrer">GitHub</a>
       <span>|</span>
       <span>App v{{ appVersion }}</span>
       <span>|</span>
