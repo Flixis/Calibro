@@ -33,6 +33,52 @@ struct DbState(Mutex<Connection>);
 unsafe impl Send for DbState {}
 unsafe impl Sync for DbState {}
 
+fn migrate_db(conn: &Connection) -> SqlResult<()> {
+    // Get list of columns in calibrations table
+    let mut stmt = conn.prepare("PRAGMA table_info(calibrations)")?;
+    let columns: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // If we find any measurement columns in calibrations table, migrate them
+    let measurement_columns = ["voltage", "current", "frequency", "power"];
+    for col in measurement_columns.iter() {
+        if columns.iter().any(|c| c == col) {
+            // Create a temporary table with correct schema
+            conn.execute(
+                "CREATE TABLE calibrations_new (
+                    id INTEGER PRIMARY KEY,
+                    calibration_date TEXT NOT NULL,
+                    certificate_number TEXT NOT NULL UNIQUE,
+                    model_details TEXT NOT NULL,
+                    company_name TEXT NOT NULL,
+                    po_number TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )",
+                [],
+            )?;
+
+            // Copy data to new table
+            conn.execute(
+                "INSERT INTO calibrations_new 
+                SELECT id, calibration_date, certificate_number, model_details,
+                       company_name, po_number, created_at
+                FROM calibrations",
+                [],
+            )?;
+
+            // Drop old table and rename new one
+            conn.execute("DROP TABLE calibrations", [])?;
+            conn.execute("ALTER TABLE calibrations_new RENAME TO calibrations", [])?;
+
+            // No need to check other columns since we've already migrated
+            break;
+        }
+    }
+
+    Ok(())
+}
+
 fn init_db(app_handle: &AppHandle) -> SqlResult<Connection> {
     let app_dir = app_handle
         .path()
@@ -43,6 +89,7 @@ fn init_db(app_handle: &AppHandle) -> SqlResult<Connection> {
     let db_path = app_dir.join("calibration.db");
     let db = Connection::open(db_path)?;
 
+    // Create tables if they don't exist with correct schema
     db.execute(
         "CREATE TABLE IF NOT EXISTS calibrations (
             id INTEGER PRIMARY KEY,
@@ -363,6 +410,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let db = init_db(&app.handle())?;
+            migrate_db(&db)?;
             app.manage(DbState(Mutex::new(db)));
             Ok(())
         })
